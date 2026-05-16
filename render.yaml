@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: blueberrymarket-api
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: npm install
+    startCommand: node src/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: ADMIN_SECRET
+        generateValue: true
+      - key: REFERRAL_BONUS_USD
+        value: "10"
+      - key: TRADING_FEE
+        value: "0.001"
+      - key: MIN_DEPOSIT_USD
+        value: "10"
+      - key: MIN_WITHDRAWAL_USD
+        value: "20"
+      - key: WITHDRAWAL_FEE_USD
+        value: "2.50"
+      - key: DB_PATH
+        value: "./data/db.json"
