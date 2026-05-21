@@ -1,65 +1,47 @@
 const jwt = require('jsonwebtoken');
-const db  = require('../config/database');
-
-const JWT_SECRET         = process.env.JWT_SECRET         || 'blueberry_secret';
+const { User, Session } = require('../models');
+const JWT_SECRET = process.env.JWT_SECRET || 'blueberry_secret';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'blueberry_refresh_secret';
 
-// ── Verify access token ─────────────────────────────────────────
-function authenticate(req, res, next) {
+async function authenticate(req, res, next) {
   const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer '))
-    return res.status(401).json({ error: 'Authentication required' });
-
+  if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'Authentication required' });
   try {
-    const token   = header.split(' ')[1];
+    const token = header.split(' ')[1];
     const payload = jwt.verify(token, JWT_SECRET);
-    const user    = db.get('users').find({ id: payload.userId }).value();
-    if (!user)         return res.status(401).json({ error: 'User not found' });
-    if (user.banned)   return res.status(403).json({ error: 'Account suspended. Contact support.' });
+    const user = await User.findById(payload.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (user.banned) return res.status(403).json({ error: 'Account suspended.' });
     req.userId = payload.userId;
-    req.user   = user;
+    req.user = user;
     next();
   } catch (err) {
-    if (err.name === 'TokenExpiredError')
-      return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
+    if (err.name === 'TokenExpiredError') return res.status(401).json({ error: 'Token expired', code: 'TOKEN_EXPIRED' });
     return res.status(401).json({ error: 'Invalid token' });
   }
 }
 
-// ── Admin-only guard ────────────────────────────────────────────
 function adminOnly(req, res, next) {
-  if (!req.user?.isAdmin)
-    return res.status(403).json({ error: 'Admin access required' });
+  if (!req.user?.isAdmin) return res.status(403).json({ error: 'Admin access required' });
   next();
 }
 
-// ── KYC-verified guard ──────────────────────────────────────────
 function kycRequired(req, res, next) {
-  if (!req.user?.kycVerified)
-    return res.status(403).json({ error: 'KYC verification required for this action', code: 'KYC_REQUIRED' });
+  if (!req.user?.kycVerified) return res.status(403).json({ error: 'KYC verification required', code: 'KYC_REQUIRED' });
   next();
 }
 
-// ── Issue tokens ────────────────────────────────────────────────
 function issueTokens(userId) {
-  const accessToken  = jwt.sign({ userId }, JWT_SECRET,         { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
-  const refreshToken = jwt.sign({ userId }, JWT_REFRESH_SECRET, { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '30d' });
-  // persist refresh token
-  db.get('sessions').remove({ userId }).write();
-  db.get('sessions').push({ userId, refreshToken, createdAt: new Date().toISOString() }).write();
+  const accessToken  = jwt.sign({ userId }, JWT_SECRET,         { expiresIn: '7d' });
+  const refreshToken = jwt.sign({ userId }, JWT_REFRESH_SECRET, { expiresIn: '30d' });
+  Session.deleteMany({ userId }).then(() => Session.create({ userId, refreshToken }));
   return { accessToken, refreshToken };
 }
 
-// ── Verify refresh token ────────────────────────────────────────
 function verifyRefreshToken(token) {
   try {
-    const payload = jwt.verify(token, JWT_REFRESH_SECRET);
-    const session = db.get('sessions').find({ userId: payload.userId, refreshToken: token }).value();
-    if (!session) return null;
-    return payload;
-  } catch {
-    return null;
-  }
+    return jwt.verify(token, JWT_REFRESH_SECRET);
+  } catch { return null; }
 }
 
 module.exports = { authenticate, adminOnly, kycRequired, issueTokens, verifyRefreshToken };

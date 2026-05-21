@@ -2,17 +2,13 @@ const { getUserNotifications, markRead, unreadCount } = require('../services/not
 
 async function list(req, res) {
   const { unreadOnly, limit } = req.query;
-  const notifs = getUserNotifications(req.userId, {
-    unreadOnly: unreadOnly === 'true',
-    limit:      parseInt(limit) || 30,
-  });
-  const unread = unreadCount(req.userId);
+  const notifs = await getUserNotifications(req.userId, { unreadOnly: unreadOnly === 'true', limit: parseInt(limit) || 30 });
+  const unread = await unreadCount(req.userId);
   res.json({ notifications: notifs, unreadCount: unread });
 }
 
 async function markAsRead(req, res) {
-  const { id } = req.params;
-  markRead(req.userId, id);
+  await markRead(req.userId, req.params.id);
   res.json({ message: 'Marked as read' });
 }
 

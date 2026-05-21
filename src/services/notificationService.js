@@ -1,38 +1,25 @@
-const db   = require('../config/database');
-const { v4: uuidv4 } = require('uuid');
+const { Notification } = require('../models');
 
-function createNotification(userId, { type, title, message, meta = {} }) {
-  const notif = {
-    id:        uuidv4(),
-    userId,
-    type,       // 'trade' | 'deposit' | 'withdrawal' | 'referral' | 'kyc' | 'system'
-    title,
-    message,
-    meta,
-    read:      false,
-    createdAt: new Date().toISOString(),
-  };
-  db.get('notifications').push(notif).write();
-  return notif;
+async function createNotification(userId, { type, title, message, meta = {} }) {
+  return await Notification.create({ userId, type, title, message, meta });
 }
 
-function getUserNotifications(userId, { unreadOnly = false, limit = 30 } = {}) {
-  let q = db.get('notifications').filter({ userId });
-  if (unreadOnly) q = q.filter({ read: false });
-  return q.sortBy('createdAt').reverse().take(limit).value();
+async function getUserNotifications(userId, { unreadOnly = false, limit = 30 } = {}) {
+  const q = { userId };
+  if (unreadOnly) q.read = false;
+  return await Notification.find(q).sort({ createdAt: -1 }).limit(limit);
 }
 
-function markRead(userId, notifId) {
+async function markRead(userId, notifId) {
   if (notifId === 'all') {
-    db.get('notifications').filter({ userId }).each(n => { n.read = true; }).write();
+    await Notification.updateMany({ userId }, { read: true });
   } else {
-    const n = db.get('notifications').find({ id: notifId, userId }).value();
-    if (n) { n.read = true; db.write(); }
+    await Notification.findOneAndUpdate({ _id: notifId, userId }, { read: true });
   }
 }
 
-function unreadCount(userId) {
-  return db.get('notifications').filter({ userId, read: false }).size().value();
+async function unreadCount(userId) {
+  return await Notification.countDocuments({ userId, read: false });
 }
 
 module.exports = { createNotification, getUserNotifications, markRead, unreadCount };
