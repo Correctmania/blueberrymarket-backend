@@ -23,7 +23,6 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(morgan('dev'));
 
-// Relaxed rate limits
 app.use('/api/', rateLimit({ windowMs: 60000, max: 500, message: { error: 'Too many requests.' } }));
 app.use('/api/auth/', rateLimit({ windowMs: 60000, max: 50, message: { error: 'Too many attempts. Wait 1 minute.' } }));
 
@@ -34,7 +33,6 @@ app.use(errorHandler);
 
 async function start() {
   await connectDB();
-  // Auto-seed admin on first boot
   const { User } = require('./models');
   const bcrypt = require('bcryptjs');
   const { credit } = require('./services/walletService');
@@ -45,21 +43,14 @@ async function start() {
     await credit(admin._id.toString(), 'USD', 999999);
     console.log('✅ Admin account auto-created');
   } else {
-    // Ensure admin flag is set
     await User.findByIdAndUpdate(adminExists._id, { isAdmin: true });
   }
 
   server.listen(PORT, () => {
-    console.log('\n🫐 ══════════════════════════════════════');
-    console.log(`   BlueberryMarket API  v1.0.0`);
-    console.log(`   http://localhost:${PORT}`);
-    console.log('════════════════════════════════════════\n');
+    console.log('\n🫐 BlueberryMarket API running on port ' + PORT);
     startPriceEngine();
-    console.log('✅ Market price engine started');
     createWebSocketServer(server);
-    console.log('✅ WebSocket server started');
     startCronJobs();
-    console.log('✅ Cron jobs started\n');
   });
 }
 
