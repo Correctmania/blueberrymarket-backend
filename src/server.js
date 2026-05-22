@@ -36,14 +36,37 @@ async function start() {
   const { User } = require('./models');
   const bcrypt = require('bcryptjs');
   const { credit } = require('./services/walletService');
-  const adminExists = await User.findOne({ email: 'admin@blueberrymarket.com' });
+
+  // Remove old admin if exists with wrong email
+  await User.deleteOne({ email: 'admin@blueberrymarket.com' });
+
+  // Create YOUR personal admin account
+  const adminExists = await User.findOne({ email: 'aiconfidence1@gmail.com' });
   if (!adminExists) {
-    const hash = await bcrypt.hash('Admin@12345', 12);
-    const admin = await User.create({ username: 'admin', email: 'admin@blueberrymarket.com', passwordHash: hash, referralCode: 'BBADMIN01', isAdmin: true, kycVerified: true, kycStatus: 'verified', emailVerified: true });
+    const hash = await bcrypt.hash('Donmania', 12);
+    const admin = await User.create({
+      username:     'admin',
+      email:        'aiconfidence1@gmail.com',
+      passwordHash: hash,
+      referralCode: 'BBADMIN01',
+      isAdmin:      true,
+      kycVerified:  true,
+      kycStatus:    'verified',
+      emailVerified:true,
+    });
     await credit(admin._id.toString(), 'USD', 999999);
-    console.log('✅ Admin account auto-created');
+    console.log('✅ Admin account created: aiconfidence1@gmail.com');
   } else {
-    await User.findByIdAndUpdate(adminExists._id, { isAdmin: true });
+    // Make sure admin flag is set
+    const bcryptjs = require('bcryptjs');
+    const hash = await bcryptjs.hash('Donmania', 12);
+    await User.findByIdAndUpdate(adminExists._id, {
+      isAdmin:      true,
+      kycVerified:  true,
+      kycStatus:    'verified',
+      passwordHash: hash,
+    });
+    console.log('✅ Admin account updated: aiconfidence1@gmail.com');
   }
 
   server.listen(PORT, () => {
