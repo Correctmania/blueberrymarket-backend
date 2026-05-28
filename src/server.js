@@ -611,16 +611,36 @@ app.post('/api/admin/users/:id/unban', authMiddleware, adminOnly, async (req, re
 });
 
 app.post('/api/admin/users/:id/credit', authMiddleware, adminOnly, async (req, res) => {
-  const { currency, amount, note } = req.body;
-  const user = await User.findById(req.params.id);
-  if (!user) return res.status(404).json({ error:'Not found' });
-  const amt = parseFloat(amount);
-  if (!currency||!amt||amt<=0) return res.status(422).json({ error:'currency and amount required' });
-  await credit(req.params.id, currency.toUpperCase(), amt);
-  const tx = await Transaction.create({ userId:req.params.id, type:'admin_credit', currency:currency.toUpperCase(), amount:amt, fee:0, netAmount:amt, method:'admin', status:'completed', note:note||`Admin credit` });
-  await AdminLog.create({ adminId:req.userId, action:'credit_user', meta:{ targetUserId:req.params.id, currency, amount:amt } });
-  await Notification.create({ userId:req.params.id, type:'deposit', title:'Funds Credited', message:`${amt} ${currency.toUpperCase()} added to your account.` });
-  res.json({ message:`Credited ${amt} ${currency} to ${user.username}`, transaction:tx });
+  try {
+    const { currency, amount, note } = req.body;
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error:'User not found' });
+    const amt = parseFloat(amount);
+    if (!currency||!amt||amt<=0) return res.status(422).json({ error:'currency and amount required' });
+    const cur = currency.toUpperCase();
+    const uid = user._id.toString();
+    // Find or create wallet
+    let wallet = await Wallet.findOne({ userId: uid });
+    if (!wallet) {
+      wallet = await Wallet.create({ userId: uid, balances:{USD:0,BTC:0,ETH:0,BNB:0,SOL:0,ADA:0,XRP:0,DOGE:0,AVAX:0,USDT:0,USDC:0} });
+    }
+    // Use $inc for atomic increment
+    const incField = {};
+    incField[`balances.${cur}`] = amt;
+    const updated = await Wallet.findOneAndUpdate(
+      { userId: uid },
+      { $inc: incField },
+      { new: true, upsert: true }
+    );
+    console.log(`Credited ${amt} ${cur} to ${user.email}. New balance:`, updated.balances[cur]);
+    const tx = await Transaction.create({ userId: uid, type:'admin_credit', currency: cur, amount: amt, fee:0, netAmount:amt, method:'admin', status:'completed', note:note||`Admin credit by admin` });
+    await AdminLog.create({ adminId:req.userId, action:'credit_user', meta:{ targetUserId:uid, currency:cur, amount:amt } });
+    await Notification.create({ userId: uid, type:'deposit', title:'Funds Credited', message:`${amt} ${cur} has been added to your account.` });
+    res.json({ message:`Successfully credited ${amt} ${cur} to ${user.username} (${user.email})`, newBalance: updated.balances[cur], transaction:tx });
+  } catch(e) {
+    console.error('Credit error:', e);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/admin/users/:id/deduct', authMiddleware, adminOnly, async (req, res) => {
@@ -703,6 +723,20 @@ app.post('/api/admin/support/:id/reply', authMiddleware, adminOnly, async (req, 
 app.get('/api/admin/audit-log', authMiddleware, adminOnly, async (req, res) => {
   const logs = await AdminLog.find().sort({createdAt:-1}).limit(100);
   res.json({ logs });
+});
+
+// ── DEBUG (admin only) ────────────────────────────────────────
+app.get('/api/debug/wallet/:email', async (req, res) => {
+  try {
+    const user = await User.findOne({ email: req.params.email.toLowerCase() });
+    if (!user) return res.json({ error: 'User not found', email: req.params.email });
+    const wallet = await Wallet.findOne({ userId: user._id.toString() });
+    res.json({
+      user: { id: user._id.toString(), email: user.email, username: user.username },
+      wallet: wallet ? wallet.toObject() : null,
+      walletUserId: wallet?.userId
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // ── 404 ────────────────────────────────────────────────────────
