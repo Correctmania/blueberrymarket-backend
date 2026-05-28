@@ -122,21 +122,41 @@ setInterval(() => {
 // ── Wallet helpers ─────────────────────────────────────────────
 async function getWallet(userId) {
   let w = await Wallet.findOne({ userId });
-  if (!w) w = await Wallet.create({ userId, balances:{USD:0,BTC:0,ETH:0,BNB:0,SOL:0,ADA:0,XRP:0,DOGE:0,AVAX:0,USDT:0,USDC:0} });
+  if (!w) {
+    w = await Wallet.create({ userId, balances:{USD:0,BTC:0,ETH:0,BNB:0,SOL:0,ADA:0,XRP:0,DOGE:0,AVAX:0,USDT:0,USDC:0} });
+  }
   return w;
 }
 async function credit(userId, currency, amount) {
-  const w = await getWallet(userId);
-  const bal = { ...w.balances };
-  bal[currency] = parseFloat(((bal[currency]||0) + amount).toFixed(10));
-  await Wallet.findOneAndUpdate({ userId }, { balances: bal });
+  const uid = userId.toString();
+  let w = await Wallet.findOne({ userId: uid });
+  if (!w) {
+    w = await Wallet.create({ userId: uid, balances:{USD:0,BTC:0,ETH:0,BNB:0,SOL:0,ADA:0,XRP:0,DOGE:0,AVAX:0,USDT:0,USDC:0} });
+  }
+  // Use $inc for atomic update - most reliable way
+  const updateKey = `balances.${currency}`;
+  const updateObj = {};
+  updateObj[updateKey] = parseFloat(amount);
+  await Wallet.findOneAndUpdate(
+    { userId: uid },
+    { $inc: updateObj },
+    { new: true, upsert: true }
+  );
 }
 async function debit(userId, currency, amount) {
-  const w = await getWallet(userId);
-  const bal = { ...w.balances };
-  if ((bal[currency]||0) < amount) throw Object.assign(new Error('Insufficient balance'), { status: 400 });
-  bal[currency] = parseFloat(((bal[currency]||0) - amount).toFixed(10));
-  await Wallet.findOneAndUpdate({ userId }, { balances: bal });
+  const uid = userId.toString();
+  const w = await Wallet.findOne({ userId: uid });
+  if (!w || (w.balances[currency] || 0) < amount) {
+    throw Object.assign(new Error('Insufficient balance'), { status: 400 });
+  }
+  const updateKey = `balances.${currency}`;
+  const updateObj = {};
+  updateObj[updateKey] = -parseFloat(amount);
+  await Wallet.findOneAndUpdate(
+    { userId: uid },
+    { $inc: updateObj },
+    { new: true }
+  );
 }
 
 // ── JWT helpers ────────────────────────────────────────────────
@@ -328,11 +348,24 @@ app.get('/api/market/chart/:symbol', (req, res) => {
 
 // ── WALLET ─────────────────────────────────────────────────────
 app.get('/api/wallet/balance', authMiddleware, async (req, res) => {
-  const w = await getWallet(req.userId);
-  const bal = w.balances;
-  const assets = Object.entries(bal).map(([sym,amt])=>({ symbol:sym, amount:amt, priceUSD:sym==='USD'?1:(prices[sym]?.price||0), valueUSD:+((sym==='USD'?1:(prices[sym]?.price||0))*amt).toFixed(2) }));
+  const uid = req.userId.toString();
+  const w = await Wallet.findOne({ userId: uid });
+  if (!w) {
+    // Create wallet with 0 balances if not exists
+    await Wallet.create({ userId: uid, balances:{USD:0,BTC:0,ETH:0,BNB:0,SOL:0,ADA:0,XRP:0,DOGE:0,AVAX:0,USDT:0,USDC:0} });
+    return res.json({ assets: [], totalUSD: 0 });
+  }
+  // Convert Mongoose Mixed type to plain object
+  const bal = w.toObject().balances || {};
+  const assets = Object.entries(bal).map(([sym,amt])=>({
+    symbol: sym,
+    amount: parseFloat(amt) || 0,
+    priceUSD: sym==='USD' ? 1 : (prices[sym]?.price || 0),
+    valueUSD: +((sym==='USD' ? 1 : (prices[sym]?.price||0)) * (parseFloat(amt)||0)).toFixed(2)
+  }));
   assets.sort((a,b)=>b.valueUSD-a.valueUSD);
-  res.json({ assets, totalUSD:+assets.reduce((s,a)=>s+a.valueUSD,0).toFixed(2) });
+  const totalUSD = +assets.reduce((s,a)=>s+a.valueUSD,0).toFixed(2);
+  res.json({ assets, totalUSD });
 });
 
 app.get('/api/wallet/address', authMiddleware, (req, res) => {
